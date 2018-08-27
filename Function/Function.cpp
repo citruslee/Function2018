@@ -1,180 +1,169 @@
-// Function.cpp : Defines the entry point for the application.
-//
+#include <windows.h>
+#include <windowsx.h>
+#include <d3d11.h>
+#include <d3dcompiler.h>
 
-#include "stdafx.h"
-#include "Function.h"
+#pragma comment (lib, "d3d11.lib")
+#pragma comment (lib, "D3DCompiler.lib")
 
-#define MAX_LOADSTRING 100
+#define SCREEN_WIDTH  1280
+#define SCREEN_HEIGHT 720
 
-// Global Variables:
-HINSTANCE hInst;                                // current instance
-WCHAR szTitle[MAX_LOADSTRING];                  // The title bar text
-WCHAR szWindowClass[MAX_LOADSTRING];            // the main window class name
+IDXGISwapChain *swapchain;          
+ID3D11Device *dev;                  
+ID3D11DeviceContext *devcon;        
+ID3D11RenderTargetView *backbuffer; 
+ID3D11VertexShader *pVS;            
+ID3D11PixelShader *pPS;
+D3D11_VIEWPORT viewport;
+            	
+void InitD3D(HWND hWnd);
+void RenderFrame(void); 
+void CleanD3D(void);    
 
-// Forward declarations of functions included in this code module:
-ATOM                MyRegisterClass(HINSTANCE hInstance);
-BOOL                InitInstance(HINSTANCE, int);
-LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
-INT_PTR CALLBACK    About(HWND, UINT, WPARAM, LPARAM);
+ID3D11ShaderReflectionConstantBuffer* constantBufferReflection;
+ID3D11Buffer* constantBuffer;
+unsigned char constantBufferData[512];
 
-int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
-                     _In_opt_ HINSTANCE hPrevInstance,
-                     _In_ LPWSTR    lpCmdLine,
-                     _In_ int       nCmdShow)
+LRESULT CALLBACK WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
+
+
+//ID3D11Buffer * pFullscreenQuadConstantBuffer = NULL;
+
+void __UpdateConstants(ID3D11ShaderReflectionConstantBuffer* pCBuf, ID3D11Buffer* cbuffer, unsigned char* pFullscreenQuadConstants)
 {
-    UNREFERENCED_PARAMETER(hPrevInstance);
-    UNREFERENCED_PARAMETER(lpCmdLine);
-
-    // TODO: Place code here.
-
-    // Initialize global strings
-    LoadStringW(hInstance, IDS_APP_TITLE, szTitle, MAX_LOADSTRING);
-    LoadStringW(hInstance, IDC_FUNCTION, szWindowClass, MAX_LOADSTRING);
-    MyRegisterClass(hInstance);
-
-    // Perform application initialization:
-    if (!InitInstance (hInstance, nCmdShow))
-    {
-        return FALSE;
-    }
-
-    HACCEL hAccelTable = LoadAccelerators(hInstance, MAKEINTRESOURCE(IDC_FUNCTION));
-
-    MSG msg;
-
-    // Main message loop:
-    while (GetMessage(&msg, nullptr, 0, 0))
-    {
-        if (!TranslateAccelerator(msg.hwnd, hAccelTable, &msg))
-        {
-            TranslateMessage(&msg);
-            DispatchMessage(&msg);
-        }
-    }
-
-    return (int) msg.wParam;
+	D3D11_MAPPED_SUBRESOURCE subRes;
+	devcon->Map(cbuffer, NULL, D3D11_MAP_WRITE_DISCARD, NULL, &subRes);
+	CopyMemory(subRes.pData, &pFullscreenQuadConstants, sizeof(pFullscreenQuadConstants));
+	devcon->Unmap(cbuffer, NULL);
 }
 
-
-
-//
-//  FUNCTION: MyRegisterClass()
-//
-//  PURPOSE: Registers the window class.
-//
-ATOM MyRegisterClass(HINSTANCE hInstance)
+void SetShaderConstant(ID3D11ShaderReflectionConstantBuffer* pCBuf, ID3D11Buffer* cbuffer, unsigned char* data, const char * szConstName, float x)
 {
-    WNDCLASSEXW wcex;
+	ID3D11ShaderReflectionVariable * pCVar = pCBuf->GetVariableByName(szConstName);
+	D3D11_SHADER_VARIABLE_DESC pDesc;
+	if (pCVar->GetDesc(&pDesc) != S_OK)
+		return;
+	((float*)(((unsigned char*)&data) + pDesc.StartOffset))[0] = x;
 
-    wcex.cbSize = sizeof(WNDCLASSEX);
-
-    wcex.style          = CS_HREDRAW | CS_VREDRAW;
-    wcex.lpfnWndProc    = WndProc;
-    wcex.cbClsExtra     = 0;
-    wcex.cbWndExtra     = 0;
-    wcex.hInstance      = hInstance;
-    wcex.hIcon          = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_FUNCTION));
-    wcex.hCursor        = LoadCursor(nullptr, IDC_ARROW);
-    wcex.hbrBackground  = (HBRUSH)(COLOR_WINDOW+1);
-    wcex.lpszMenuName   = MAKEINTRESOURCEW(IDC_FUNCTION);
-    wcex.lpszClassName  = szWindowClass;
-    wcex.hIconSm        = LoadIcon(wcex.hInstance, MAKEINTRESOURCE(IDI_SMALL));
-
-    return RegisterClassExW(&wcex);
+	__UpdateConstants(pCBuf, cbuffer, data);
 }
 
-//
-//   FUNCTION: InitInstance(HINSTANCE, int)
-//
-//   PURPOSE: Saves instance handle and creates main window
-//
-//   COMMENTS:
-//
-//        In this function, we save the instance handle in a global variable and
-//        create and display the main program window.
-//
-BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
+void SetShaderConstant(ID3D11ShaderReflectionConstantBuffer* pCBuf, ID3D11Buffer* cbuffer, unsigned char* data, const char * szConstName, float x, float y)
 {
-   hInst = hInstance; // Store instance handle in our global variable
+	ID3D11ShaderReflectionVariable * pCVar = pCBuf->GetVariableByName(szConstName);
+	D3D11_SHADER_VARIABLE_DESC pDesc;
+	if (pCVar->GetDesc(&pDesc) != S_OK)
+		return;
 
-   HWND hWnd = CreateWindowW(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW,
-      CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, nullptr, nullptr, hInstance, nullptr);
+	((float*)(((unsigned char*)&data) + pDesc.StartOffset))[0] = x;
+	((float*)(((unsigned char*)&data) + pDesc.StartOffset))[1] = y;
 
-   if (!hWnd)
-   {
-      return FALSE;
-   }
-
-   ShowWindow(hWnd, nCmdShow);
-   UpdateWindow(hWnd);
-
-   return TRUE;
+	__UpdateConstants(pCBuf, cbuffer, data);
 }
 
-//
-//  FUNCTION: WndProc(HWND, UINT, WPARAM, LPARAM)
-//
-//  PURPOSE:  Processes messages for the main window.
-//
-//  WM_COMMAND  - process the application menu
-//  WM_PAINT    - Paint the main window
-//  WM_DESTROY  - post a quit message and return
-//
-//
-LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 {
-    switch (message)
-    {
-    case WM_COMMAND:
-        {
-            int wmId = LOWORD(wParam);
-            // Parse the menu selections:
-            switch (wmId)
-            {
-            case IDM_ABOUT:
-                DialogBox(hInst, MAKEINTRESOURCE(IDD_ABOUTBOX), hWnd, About);
-                break;
-            case IDM_EXIT:
-                DestroyWindow(hWnd);
-                break;
-            default:
-                return DefWindowProc(hWnd, message, wParam, lParam);
-            }
-        }
-        break;
-    case WM_PAINT:
-        {
-            PAINTSTRUCT ps;
-            HDC hdc = BeginPaint(hWnd, &ps);
-            // TODO: Add any drawing code that uses hdc here...
-            EndPaint(hWnd, &ps);
-        }
-        break;
-    case WM_DESTROY:
-        PostQuitMessage(0);
-        break;
-    default:
-        return DefWindowProc(hWnd, message, wParam, lParam);
-    }
-    return 0;
+	HWND hWnd;
+	WNDCLASSEX wc = WNDCLASSEX();
+	wc.cbSize = sizeof(WNDCLASSEX);
+	wc.style = CS_HREDRAW | CS_VREDRAW;
+	wc.lpfnWndProc = WindowProc;
+	wc.hInstance = hInstance;
+	wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+	wc.lpszClassName = L"WindowClass";
+	RegisterClassEx(&wc);
+	RECT wr = { 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT };
+	AdjustWindowRect(&wr, WS_OVERLAPPEDWINDOW, FALSE);
+	hWnd = CreateWindowEx(NULL, wc.lpszClassName, L"Punci", WS_OVERLAPPEDWINDOW, 300, 300, wr.right - wr.left, wr.bottom - wr.top, NULL, NULL, hInstance, NULL);
+	ShowWindow(hWnd, nCmdShow);
+	InitD3D(hWnd);
+	SetShaderConstant(constantBufferReflection, constantBuffer, constantBufferData, "Resolution", SCREEN_WIDTH, SCREEN_HEIGHT);
+	MSG msg;
+	while (TRUE)
+	{
+		if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+		{
+			TranslateMessage(&msg);
+			DispatchMessage(&msg);
+
+			if (msg.message == WM_QUIT)
+			{
+				break;
+			}
+		}
+		RenderFrame();
+	}
+	CleanD3D();
+	return msg.wParam;
 }
 
-// Message handler for about box.
-INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
+LRESULT CALLBACK WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
-    UNREFERENCED_PARAMETER(lParam);
-    switch (message)
-    {
-    case WM_INITDIALOG:
-        return (INT_PTR)TRUE;
+	switch (message)
+	{
+	case WM_DESTROY:
+	{
+		PostQuitMessage(0);
+		return 0;
+	} break;
+	}
 
-    case WM_COMMAND:
-        if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDCANCEL)
-        {
-            EndDialog(hDlg, LOWORD(wParam));
-            return (INT_PTR)TRUE;
-        }
-        break;
-    }
-    return (INT_PTR)FALSE;
+	return DefWindowProc(hWnd, message, wParam, lParam);
+}
+
+void InitD3D(HWND hWnd)
+{
+	DXGI_SWAP_CHAIN_DESC scd = DXGI_SWAP_CHAIN_DESC();
+	scd.BufferCount = 1;                                   
+	scd.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;    
+	scd.BufferDesc.Width = SCREEN_WIDTH;                   
+	scd.BufferDesc.Height = SCREEN_HEIGHT;                 
+	scd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;     
+	scd.OutputWindow = hWnd;                               
+	scd.SampleDesc.Count = 4;                              
+	scd.Windowed = TRUE;                                   
+	scd.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;    
+	D3D11CreateDeviceAndSwapChain(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, NULL, NULL, NULL, D3D11_SDK_VERSION, &scd, &swapchain, &dev, NULL, &devcon);
+	ID3D11Texture2D *pBackBuffer;
+	swapchain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID*)&pBackBuffer);
+	dev->CreateRenderTargetView(pBackBuffer, NULL, &backbuffer);
+	pBackBuffer->Release();
+
+	viewport = D3D11_VIEWPORT();
+	viewport.TopLeftX = 0;
+	viewport.TopLeftY = 0;
+	viewport.Width = SCREEN_WIDTH;
+	viewport.Height = SCREEN_HEIGHT;
+	
+	ID3DBlob *VS, *PS;
+	D3DCompileFromFile(L"VertexShader.hlsl", nullptr, nullptr, "main", "vs_5_0", 0, 0, &VS, nullptr);
+	D3DCompileFromFile(L"PixelShader.hlsl", nullptr, nullptr, "main", "ps_5_0", 0, 0, &PS, nullptr);
+
+	dev->CreateVertexShader(VS->GetBufferPointer(), VS->GetBufferSize(), NULL, &pVS);
+	dev->CreatePixelShader(PS->GetBufferPointer(), PS->GetBufferSize(), NULL, &pPS);
+}
+
+void RenderFrame(void)
+{
+	float clearcolour[4] = { 0.0f, 0.2f, 0.4f, 1.0f };
+	devcon->ClearRenderTargetView(backbuffer, clearcolour);
+	devcon->OMSetRenderTargets(1, &backbuffer, NULL);
+	devcon->RSSetViewports(1, &viewport);
+	devcon->IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	devcon->VSSetShader(pVS, 0, 0);
+	devcon->PSSetShader(pPS, 0, 0);
+	devcon->Draw(3, 0);
+	swapchain->Present(0, 0);
+}
+
+void CleanD3D(void)
+{
+	swapchain->SetFullscreenState(FALSE, NULL);
+	pVS->Release();
+	pPS->Release();
+	swapchain->Release();
+	backbuffer->Release();
+	dev->Release();
+	devcon->Release();
 }
