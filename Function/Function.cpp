@@ -5,6 +5,9 @@
 
 #pragma comment (lib, "d3d11.lib")
 #pragma comment (lib, "D3DCompiler.lib")
+#pragma comment (lib, "dxguid.lib")
+
+#define DEVELOPMENT
 
 #define SCREEN_WIDTH  1280
 #define SCREEN_HEIGHT 720
@@ -15,6 +18,7 @@ ID3D11DeviceContext *devcon;
 ID3D11RenderTargetView *backbuffer; 
 ID3D11VertexShader *pVS;            
 ID3D11PixelShader *pPS;
+ID3D11ShaderReflection * pShaderReflection = NULL;
 D3D11_VIEWPORT viewport;
             	
 void InitD3D(HWND hWnd);
@@ -27,39 +31,29 @@ unsigned char constantBufferData[512];
 
 LRESULT CALLBACK WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 
-
-//ID3D11Buffer * pFullscreenQuadConstantBuffer = NULL;
-
-void __UpdateConstants(ID3D11ShaderReflectionConstantBuffer* pCBuf, ID3D11Buffer* cbuffer, unsigned char* pFullscreenQuadConstants)
+bool ReloadShader(ID3D11PixelShader** PixelShader, ID3D11ShaderReflectionConstantBuffer** pCBuf, const char * szShaderFile)
 {
-	D3D11_MAPPED_SUBRESOURCE subRes;
-	devcon->Map(cbuffer, NULL, D3D11_MAP_WRITE_DISCARD, NULL, &subRes);
-	CopyMemory(subRes.pData, &pFullscreenQuadConstants, sizeof(pFullscreenQuadConstants));
-	devcon->Unmap(cbuffer, NULL);
-}
+	ID3DBlob * pCode = NULL;
+	ID3DBlob * pErrors = NULL;
+	if (D3DCompileFromFile(L"PixelShader.hlsl", nullptr, nullptr, "main", "ps_5_0", 0, 0, &pCode, &pErrors) != S_OK)
+	{
+		return false;
+	}
 
-void SetShaderConstant(ID3D11ShaderReflectionConstantBuffer* pCBuf, ID3D11Buffer* cbuffer, unsigned char* data, const char * szConstName, float x)
-{
-	ID3D11ShaderReflectionVariable * pCVar = pCBuf->GetVariableByName(szConstName);
-	D3D11_SHADER_VARIABLE_DESC pDesc;
-	if (pCVar->GetDesc(&pDesc) != S_OK)
-		return;
-	((float*)(((unsigned char*)&data) + pDesc.StartOffset))[0] = x;
+	if (*PixelShader)
+	{
+		(*PixelShader)->Release();
+		(*PixelShader) = NULL;
+	}
 
-	__UpdateConstants(pCBuf, cbuffer, data);
-}
+	if (dev->CreatePixelShader(pCode->GetBufferPointer(), pCode->GetBufferSize(), NULL, &*PixelShader) != S_OK)
+	{
+		return false;
+	}
+	D3DReflect(pCode->GetBufferPointer(), pCode->GetBufferSize(), IID_ID3D11ShaderReflection, (void**)&pShaderReflection);
+	*pCBuf = pShaderReflection->GetConstantBufferByIndex(0);
 
-void SetShaderConstant(ID3D11ShaderReflectionConstantBuffer* pCBuf, ID3D11Buffer* cbuffer, unsigned char* data, const char * szConstName, float x, float y)
-{
-	ID3D11ShaderReflectionVariable * pCVar = pCBuf->GetVariableByName(szConstName);
-	D3D11_SHADER_VARIABLE_DESC pDesc;
-	if (pCVar->GetDesc(&pDesc) != S_OK)
-		return;
-
-	((float*)(((unsigned char*)&data) + pDesc.StartOffset))[0] = x;
-	((float*)(((unsigned char*)&data) + pDesc.StartOffset))[1] = y;
-
-	__UpdateConstants(pCBuf, cbuffer, data);
+	return true;
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
@@ -73,12 +67,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	wc.hCursor = LoadCursor(NULL, IDC_ARROW);
 	wc.lpszClassName = L"WindowClass";
 	RegisterClassEx(&wc);
+
+	DWORD wStyle = WS_POPUP | WS_CLIPSIBLINGS | WS_CLIPCHILDREN;
+	wStyle |= WS_OVERLAPPED | WS_CAPTION;
 	RECT wr = { 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT };
-	AdjustWindowRect(&wr, WS_OVERLAPPEDWINDOW, FALSE);
-	hWnd = CreateWindowEx(NULL, wc.lpszClassName, L"Punci", WS_OVERLAPPEDWINDOW, 300, 300, wr.right - wr.left, wr.bottom - wr.top, NULL, NULL, hInstance, NULL);
+	AdjustWindowRect(&wr, wStyle, FALSE);
+	hWnd = CreateWindowExW(NULL, wc.lpszClassName, L"Punci", wStyle, 300, 300, wr.right - wr.left, wr.bottom - wr.top, NULL, NULL, hInstance, NULL);
 	ShowWindow(hWnd, nCmdShow);
 	InitD3D(hWnd);
-	SetShaderConstant(constantBufferReflection, constantBuffer, constantBufferData, "Resolution", SCREEN_WIDTH, SCREEN_HEIGHT);
+	//SetShaderConstant(constantBufferReflection, constantBuffer, constantBufferData, "Resolution", SCREEN_WIDTH, SCREEN_HEIGHT);
 	MSG msg;
 	while (TRUE)
 	{
@@ -91,7 +88,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 			{
 				break;
 			}
+			
 		}
+#if defined(DEVELOPMENT)
+		if (GetKeyState(VK_CONTROL) & 0x8000 && GetKeyState(0x53) & 0x8000)
+		{
+			ReloadShader(&pPS, &constantBufferReflection, "PixelShader.hlsl");
+		}
+#endif
 		RenderFrame();
 	}
 	CleanD3D();
@@ -106,7 +110,16 @@ LRESULT CALLBACK WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
 	{
 		PostQuitMessage(0);
 		return 0;
-	} break;
+	}
+	case WM_KEYDOWN:
+	{
+		if (wParam == VK_ESCAPE)
+		{
+			PostQuitMessage(0);
+			return 0;
+		}
+		break;
+	}
 	}
 
 	return DefWindowProc(hWnd, message, wParam, lParam);
