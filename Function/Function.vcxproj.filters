@@ -63,4 +63,9 @@
       <Filter>Resource Files\Shaders</Filter>
     </FxCompile>
   </ItemGroup>
+  <ItemGroup>
+    <None Include="hg_sdf.hlsli">
+      <Filter>Resource Files\Shaders</Filter>
+    </None>
+  </ItemGroup>
 </Project>

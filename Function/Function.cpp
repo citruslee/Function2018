@@ -2,12 +2,14 @@
 #include <windowsx.h>
 #include <d3d11.h>
 #include <d3dcompiler.h>
+#include <stdio.h>
 
 #pragma comment (lib, "d3d11.lib")
 #pragma comment (lib, "D3DCompiler.lib")
 #pragma comment (lib, "dxguid.lib")
 
 #define DEVELOPMENT
+#define D3D_COMPILE_STANDARD_FILE_INCLUDE ((ID3DInclude*)(UINT_PTR)1)
 
 #define SCREEN_WIDTH  1280
 #define SCREEN_HEIGHT 720
@@ -24,19 +26,23 @@ D3D11_VIEWPORT viewport;
 void InitD3D(HWND hWnd);
 void RenderFrame(void); 
 void CleanD3D(void);    
-
+#if defined(DEVELOPMENT)
+char szError[4096];
+#endif
 ID3D11ShaderReflectionConstantBuffer* constantBufferReflection;
 ID3D11Buffer* constantBuffer;
 unsigned char constantBufferData[512];
 
 LRESULT CALLBACK WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 
-bool ReloadShader(ID3D11PixelShader** PixelShader, ID3D11ShaderReflectionConstantBuffer** pCBuf, const char * szShaderFile)
+bool ReloadShader(ID3D11PixelShader** PixelShader, ID3D11ShaderReflectionConstantBuffer** pCBuf, const char * szShaderFile, char* szErrorBuffer, int nErrorBufferSize)
 {
 	ID3DBlob * pCode = NULL;
 	ID3DBlob * pErrors = NULL;
-	if (D3DCompileFromFile(L"PixelShader.hlsl", nullptr, nullptr, "main", "ps_5_0", 0, 0, &pCode, &pErrors) != S_OK)
+	if (D3DCompileFromFile(L"PixelShader.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "main", "ps_5_0", 0, 0, &pCode, &pErrors) != S_OK)
 	{
+		memset(szErrorBuffer, 0, nErrorBufferSize);
+		strncpy(szErrorBuffer, (const char*)pErrors->GetBufferPointer(), nErrorBufferSize - 1);
 		return false;
 	}
 
@@ -56,14 +62,15 @@ bool ReloadShader(ID3D11PixelShader** PixelShader, ID3D11ShaderReflectionConstan
 	return true;
 }
 
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
+//int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
+int main()
 {
 	HWND hWnd;
 	WNDCLASSEX wc = WNDCLASSEX();
 	wc.cbSize = sizeof(WNDCLASSEX);
 	wc.style = CS_HREDRAW | CS_VREDRAW;
 	wc.lpfnWndProc = WindowProc;
-	wc.hInstance = hInstance;
+	wc.hInstance = GetModuleHandle(NULL);
 	wc.hCursor = LoadCursor(NULL, IDC_ARROW);
 	wc.lpszClassName = L"WindowClass";
 	RegisterClassEx(&wc);
@@ -72,8 +79,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	wStyle |= WS_OVERLAPPED | WS_CAPTION;
 	RECT wr = { 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT };
 	AdjustWindowRect(&wr, wStyle, FALSE);
-	hWnd = CreateWindowExW(NULL, wc.lpszClassName, L"Punci", wStyle, 300, 300, wr.right - wr.left, wr.bottom - wr.top, NULL, NULL, hInstance, NULL);
-	ShowWindow(hWnd, nCmdShow);
+	hWnd = CreateWindowExW(NULL, wc.lpszClassName, L"Punci", wStyle, 300, 300, wr.right - wr.left, wr.bottom - wr.top, NULL, NULL, wc.hInstance, NULL);
+	ShowWindow(hWnd, SW_SHOW);
 	InitD3D(hWnd);
 	//SetShaderConstant(constantBufferReflection, constantBuffer, constantBufferData, "Resolution", SCREEN_WIDTH, SCREEN_HEIGHT);
 	MSG msg;
@@ -91,11 +98,22 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 			
 		}
 #if defined(DEVELOPMENT)
-		if (GetKeyState(VK_CONTROL) & 0x8000 && GetKeyState(0x53) & 0x8000)
+		if (GetAsyncKeyState(VK_CONTROL) & 0x8000 && GetAsyncKeyState(0x53) & 0x8000)
 		{
-			ReloadShader(&pPS, &constantBufferReflection, "PixelShader.hlsl");
+			if (ReloadShader(&pPS, &constantBufferReflection, "PixelShader.hlsl", szError, 4069))
+			{
+				printf("Last shader works fine.\n");
+			}
+			else 
+			{
+				printf("Shader error:\n%s\n", szError);
+			}
 		}
 #endif
+		if (GetKeyState(VK_ESCAPE) & 0x8000)
+		{
+			break;
+		}
 		RenderFrame();
 	}
 	CleanD3D();
@@ -150,8 +168,8 @@ void InitD3D(HWND hWnd)
 	viewport.Height = SCREEN_HEIGHT;
 	
 	ID3DBlob *VS, *PS;
-	D3DCompileFromFile(L"VertexShader.hlsl", nullptr, nullptr, "main", "vs_5_0", 0, 0, &VS, nullptr);
-	D3DCompileFromFile(L"PixelShader.hlsl", nullptr, nullptr, "main", "ps_5_0", 0, 0, &PS, nullptr);
+	D3DCompileFromFile(L"VertexShader.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "main", "vs_5_0", 0, 0, &VS, nullptr);
+	D3DCompileFromFile(L"PixelShader.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "main", "ps_5_0", 0, 0, &PS, nullptr);
 
 	dev->CreateVertexShader(VS->GetBufferPointer(), VS->GetBufferSize(), NULL, &pVS);
 	dev->CreatePixelShader(PS->GetBufferPointer(), PS->GetBufferSize(), NULL, &pPS);
