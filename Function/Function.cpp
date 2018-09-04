@@ -7,6 +7,13 @@
 #pragma comment (lib, "d3d11.lib")
 #pragma comment (lib, "D3DCompiler.lib")
 #pragma comment (lib, "dxguid.lib")
+#pragma comment (lib, "Mmdevapi.lib")
+#define DR_WAV_IMPLEMENTATION
+#include "dr_wav.h"
+#define MINI_AL_IMPLEMENTATION
+#include "mini_al.h"
+
+#include "Audio.hpp"
 
 #define DEVELOPMENT
 #define D3D_COMPILE_STANDARD_FILE_INCLUDE ((ID3DInclude*)(UINT_PTR)1)
@@ -22,16 +29,23 @@ ID3D11VertexShader *pVS;
 ID3D11PixelShader *pPS;
 ID3D11ShaderReflection * pShaderReflection = NULL;
 D3D11_VIEWPORT viewport;
-            	
+ID3D11Buffer* cbPerObjectBuffer;
+
+bool keyState[256];
+bool keyPressed[256];
+
 void InitD3D(HWND hWnd);
 void RenderFrame(void); 
 void CleanD3D(void);    
 #if defined(DEVELOPMENT)
 char szError[4096];
 #endif
-ID3D11ShaderReflectionConstantBuffer* constantBufferReflection;
-ID3D11Buffer* constantBuffer;
-unsigned char constantBufferData[512];
+
+struct SConstantBuffer
+{
+	float fTime;
+	float temp[3];
+};
 
 LRESULT CALLBACK WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 
@@ -39,7 +53,8 @@ bool ReloadShader(ID3D11PixelShader** PixelShader, ID3D11ShaderReflectionConstan
 {
 	ID3DBlob * pCode = NULL;
 	ID3DBlob * pErrors = NULL;
-	if (D3DCompileFromFile(L"PixelShader.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "main", "ps_5_0", 0, 0, &pCode, &pErrors) != S_OK)
+	auto returncode = D3DCompileFromFile(L"PixelShader.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "main", "ps_5_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &pCode, &pErrors);
+	if (returncode != S_OK && pErrors != NULL)
 	{
 		memset(szErrorBuffer, 0, nErrorBufferSize);
 		strncpy(szErrorBuffer, (const char*)pErrors->GetBufferPointer(), nErrorBufferSize - 1);
@@ -56,11 +71,13 @@ bool ReloadShader(ID3D11PixelShader** PixelShader, ID3D11ShaderReflectionConstan
 	{
 		return false;
 	}
-	D3DReflect(pCode->GetBufferPointer(), pCode->GetBufferSize(), IID_ID3D11ShaderReflection, (void**)&pShaderReflection);
-	*pCBuf = pShaderReflection->GetConstantBufferByIndex(0);
+	//D3DReflect(pCode->GetBufferPointer(), pCode->GetBufferSize(), IID_ID3D11ShaderReflection, (void**)&pShaderReflection);
+	//*pCBuf = pShaderReflection->GetConstantBufferByIndex(0);
 
 	return true;
 }
+
+FAudioPlayer audioPlayer;
 
 //int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 int main()
@@ -82,8 +99,30 @@ int main()
 	hWnd = CreateWindowExW(NULL, wc.lpszClassName, L"Punci", wStyle, 300, 300, wr.right - wr.left, wr.bottom - wr.top, NULL, NULL, wc.hInstance, NULL);
 	ShowWindow(hWnd, SW_SHOW);
 	InitD3D(hWnd);
-	//SetShaderConstant(constantBufferReflection, constantBuffer, constantBufferData, "Resolution", SCREEN_WIDTH, SCREEN_HEIGHT);
 	MSG msg;
+
+	audioPlayer.Initialize("selfishcrab.wav");
+	audioPlayer.Start();
+
+	ID3D11Buffer*   g_pConstantBuffer11 = NULL;
+
+	
+
+	// Supply the vertex shader constant data.
+	SConstantBuffer VsConstData;
+	VsConstData.fTime = 0.0f;
+
+	D3D11_BUFFER_DESC cbbd;
+	ZeroMemory(&cbbd, sizeof(D3D11_BUFFER_DESC));
+
+	cbbd.Usage = D3D11_USAGE_DEFAULT;
+	cbbd.ByteWidth = sizeof(SConstantBuffer);
+	cbbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+	cbbd.CPUAccessFlags = 0;
+	cbbd.MiscFlags = 0;
+
+	auto hr = dev->CreateBuffer(&cbbd, NULL, &cbPerObjectBuffer);
+	
 	while (TRUE)
 	{
 		if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
@@ -100,7 +139,7 @@ int main()
 #if defined(DEVELOPMENT)
 		if (GetAsyncKeyState(VK_CONTROL) & 0x8000 && GetAsyncKeyState(0x53) & 0x8000)
 		{
-			if (ReloadShader(&pPS, &constantBufferReflection, "PixelShader.hlsl", szError, 4069))
+			if (ReloadShader(&pPS, nullptr , "PixelShader.hlsl", szError, 4069))
 			{
 				printf("Last shader works fine.\n");
 			}
@@ -109,13 +148,43 @@ int main()
 				printf("Shader error:\n%s\n", szError);
 			}
 		}
+
+		if (keyState[VK_LEFT])
+		{
+			audioPlayer.Seek(audioPlayer.GetCurrentFrame() - 20000);
+		}
+		else if (keyState[VK_RIGHT])
+		{
+			audioPlayer.Seek(audioPlayer.GetCurrentFrame() + 20000);
+		}
+		else if (keyPressed[VK_SPACE])
+		{
+			if (audioPlayer.IsPlaying())
+			{
+				audioPlayer.Stop();
+			}
+			else
+			{
+				audioPlayer.Start();
+			}
+		}
+
+		for (int i = 0; i < 256; i++)
+		{
+			keyPressed[i] = false;
+		}
 #endif
 		if (GetKeyState(VK_ESCAPE) & 0x8000)
 		{
 			break;
 		}
+		VsConstData.fTime = audioPlayer.GetTime();
+		devcon->UpdateSubresource(cbPerObjectBuffer, 0, nullptr, &VsConstData, 0, 0);
+		devcon->PSSetConstantBuffers(0, 1, &cbPerObjectBuffer);
 		RenderFrame();
 	}
+	audioPlayer.Stop();
+	audioPlayer.Cleanup();
 	CleanD3D();
 	return msg.wParam;
 }
@@ -129,8 +198,26 @@ LRESULT CALLBACK WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
 		PostQuitMessage(0);
 		return 0;
 	}
+	case WM_KEYUP:
+	{
+		if (wParam < 256)
+		{
+			keyPressed[wParam] = keyState[wParam] = false;
+		}
+		break;
+	}
 	case WM_KEYDOWN:
 	{
+		if (wParam < 256 && !(lParam & 0x40000000))
+		{
+			keyPressed[wParam] = keyState[wParam] = true;
+		}
+
+		if (wParam < 256)
+		{
+			keyState[wParam] = true;
+		}
+
 		if (wParam == VK_ESCAPE)
 		{
 			PostQuitMessage(0);
@@ -167,12 +254,12 @@ void InitD3D(HWND hWnd)
 	viewport.Width = SCREEN_WIDTH;
 	viewport.Height = SCREEN_HEIGHT;
 	
-	ID3DBlob *VS, *PS;
-	D3DCompileFromFile(L"VertexShader.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "main", "vs_5_0", 0, 0, &VS, nullptr);
-	D3DCompileFromFile(L"PixelShader.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "main", "ps_5_0", 0, 0, &PS, nullptr);
+	ID3DBlob *VS;
+	D3DCompileFromFile(L"VertexShader.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "main", "vs_5_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &VS, nullptr);
+	ReloadShader(&pPS, nullptr, "PixelShader.hlsl", szError, 4069);
+	
 
 	dev->CreateVertexShader(VS->GetBufferPointer(), VS->GetBufferSize(), NULL, &pVS);
-	dev->CreatePixelShader(PS->GetBufferPointer(), PS->GetBufferSize(), NULL, &pPS);
 }
 
 void RenderFrame(void)
@@ -181,11 +268,11 @@ void RenderFrame(void)
 	devcon->ClearRenderTargetView(backbuffer, clearcolour);
 	devcon->OMSetRenderTargets(1, &backbuffer, NULL);
 	devcon->RSSetViewports(1, &viewport);
-	devcon->IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	devcon->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	devcon->VSSetShader(pVS, 0, 0);
 	devcon->PSSetShader(pPS, 0, 0);
 	devcon->Draw(3, 0);
-	swapchain->Present(0, 0);
+	swapchain->Present(1, 0);
 }
 
 void CleanD3D(void)
