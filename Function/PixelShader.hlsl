@@ -21,19 +21,59 @@ float Intersect(float a, float b)
 {
 	return max(a, -b);
 }
+#define mod(x, y) (x - y * floor(x / y))
 
-float Hangar(float3 pos)
+float3x3 SetCamera(in float3 ro, in float3 rt, in float cr)
 {
-	return Intersect(
-		Box(pos, float3(1, 1, 1)), 
-		Box(pos, float3(0.5, 0.5, 0.5))
-	);
+	float3 cw = normalize(rt - ro);
+	float3 cp = float3(sin(cr), cos(cr), 0.0);
+	float3 cu = normalize(cross(cw, cp));
+	float3 cv = normalize(cross(cu, cw));
+	return float3x3(cu, cv, -cw);
 }
 
+float Fractal(float3 p)
+{
+	float3 w = p;
+	float3 q = p;
+
+	q.xz = mod(q.xz + 5.0, 2.0) - 1.0;
+
+	float d = Box(q, 10.0);
+	float s = 1.0;
+	[unroll]
+	for (int m = 0; m<6; m++)
+	{
+		float h = float(m) / 6.0;
+
+		p = q - 0.5*sin(abs(p.y) + float(m)*3.0 + float3(0.0, 3.0, 1.0));
+
+		float3 a = mod(p*s, 2.0) - 1.0;
+		s *= 3.0;
+		float3 r = abs(1.0 - 3.0*abs(a));
+
+		float da = max(r.x, r.y);
+		float db = max(r.y, r.z);
+		float dc = max(r.z, r.x);
+		float c = (min(da, min(db, dc)) - 1.0) / s;
+
+		d = max(c, d);
+	}
+
+
+	float d1 = length(w - float3(0.22, 0.35, 0.4)) - 0.09;
+	d = min(d, d1);
+
+	//float d2 = Plane(p - float3(0, 1, 0), float3(0, -1, 0), 1);
+	//d = min(d, d2);
+
+
+	return d;
+}
 SSceneHitInfo scene(float3 pos)
 {
 	SSceneHitInfo info;
-	info.distance = length(pos + sin(time)) - 1;
+	info.distance = Fractal(pos);
 	info.materialidx = 1;
 	info.albedo = float3(1, 0.8, 1);
 	return info;
@@ -48,23 +88,24 @@ float3 sceneNormal(float3 pos)
 	return normalize(float3(x - distancePoint, y - distancePoint, z - distancePoint));
 }
 
-float f(float3 pos)
-{
-	return length(pos + float3(0, 10, 0)) - 1;
-}
 
 float4 main(float4 position : SV_POSITION, float2 fragmentCoordinate : TEXCOORD) : SV_TARGET
 {
 	float2 resolution = float2(1280.0, 720.0);
 	float2 uv = (position.xy - resolution.xy * 0.5) / resolution.y;
 
-	float3 raypos = float3(0.0, 0.0, -5.0);
-	float3 raydir = float3(uv.xy, 1.0);
+	float3 raypos = float3(0.0, 0.0, -sin(time * 0.1) * 2);
+	//float3 raydir = float3(uv.xy, 1.0);
+
+	float3 lookat = float3(0.0,0,0);
+
+	float3x3 camera = SetCamera(raypos, lookat, 0.0);
+	float3 raydir = normalize(mul(camera, float3(uv, -1.3)));
 
 	SSceneHitInfo result;
 	int iresult = 0.0;
 
-	for (int i = 0; i <= 50; ++i)
+	for (int i = 0; i <= 100; ++i)
 	{
 		iresult = i;
 		result = scene(raypos);
@@ -74,7 +115,7 @@ float4 main(float4 position : SV_POSITION, float2 fragmentCoordinate : TEXCOORD)
 			break;
 		}
 	}
-	if (iresult == 50)
+	if (iresult == 100)
 	{
 		result.albedo = 0;
 	}

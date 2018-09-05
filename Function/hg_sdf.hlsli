@@ -353,7 +353,7 @@ float fCone(float3 p, float radius, float height) {
 // Specialized implementations can well be faster in all cases.
 //
 
-const float3 GDFVectors[19] =
+static const float3 GDFVectors[19] =
 {
 	normalize(float3(1, 0, 0)),
 	normalize(float3(0, 1, 0)),

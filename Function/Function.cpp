@@ -51,6 +51,7 @@ LRESULT CALLBACK WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
 
 bool ReloadShader(ID3D11PixelShader** PixelShader, ID3D11ShaderReflectionConstantBuffer** pCBuf, const char * szShaderFile, char* szErrorBuffer, int nErrorBufferSize)
 {
+	Sleep(100);
 	ID3DBlob * pCode = NULL;
 	ID3DBlob * pErrors = NULL;
 	auto returncode = D3DCompileFromFile(L"PixelShader.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "main", "ps_5_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &pCode, &pErrors);
